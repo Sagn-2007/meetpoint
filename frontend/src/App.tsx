@@ -7,6 +7,12 @@ import {
   OptimizeMeetingResponse,
   Participant,
 } from './types';
+import {
+  CreateSessionResponse,
+  JoinSessionResponse,
+  MeetingSessionPublic,
+  UserRole,
+} from './types/session';
 import { checkBackendHealth, optimizeMeeting, ApiError } from './services/api';
 import { getParticipantColor } from './utils/colors';
 import { Navbar } from './components/layout/Navbar';
@@ -14,6 +20,8 @@ import { MapView } from './components/map/MapView';
 import { ParticipantList } from './components/participants/ParticipantList';
 import { OptimizationControls } from './components/optimization/OptimizationControls';
 import { ResultsPanel } from './components/results/ResultsPanel';
+import { LandingPage } from './components/collaborative/LandingPage';
+import { CollaborativeRoom } from './components/collaborative/CollaborativeRoom';
 
 // Preset sample names
 const SAMPLE_NAMES = ['Alice', 'Bob', 'Charlie', 'Diana', 'Evan', 'Fiona', 'George'];
@@ -26,14 +34,24 @@ const PRESET_PARTICIPANTS = [
 ];
 
 export const App: React.FC = () => {
-  // Application State
+  // Navigation / View state: 'landing' | 'room' | 'sandbox'
+  const [currentView, setCurrentView] = useState<'landing' | 'room' | 'sandbox'>('landing');
+
+  // URL invitation code detection
+  const [urlInvitationCode, setUrlInvitationCode] = useState<string | undefined>(undefined);
+
+  // Active Collaborative Session state
+  const [activeSession, setActiveSession] = useState<MeetingSessionPublic | null>(null);
+  const [userRole, setUserRole] = useState<UserRole>('VIEWER');
+  const [sessionToken, setSessionToken] = useState<string>('');
+  const [currentParticipantId, setCurrentParticipantId] = useState<string | null>(null);
+
+  // Single-User Sandbox State (Phase 3)
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [networkType, setNetworkType] = useState<NetworkType>('walk');
   const [objective, setObjective] = useState<OptimizationObjective>('median');
   const [topK, setTopK] = useState<number>(5);
   const [clickToAddEnabled, setClickToAddEnabled] = useState<boolean>(true);
-
-  // Results & Calculation State
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [result, setResult] = useState<OptimizeMeetingResponse | null>(null);
@@ -48,7 +66,7 @@ export const App: React.FC = () => {
     'healthy' | 'unhealthy' | 'offline' | 'checking'
   >('checking');
 
-  // Check health on mount
+  // Check health and parse URL on mount
   useEffect(() => {
     checkBackendHealth()
       .then((res) => {
@@ -57,46 +75,109 @@ export const App: React.FC = () => {
       .catch(() => {
         setBackendStatus('offline');
       });
+
+    // Check for hash or query param: #/join/CODE, #join=CODE, ?code=CODE
+    const hash = window.location.hash;
+    const searchParams = new URLSearchParams(window.location.search);
+    let detectedCode: string | null = null;
+
+    if (hash.includes('/join/')) {
+      const parts = hash.split('/join/');
+      if (parts[1]) detectedCode = parts[1].replace(/[^a-zA-Z0-9]/g, '');
+    } else if (hash.includes('join=')) {
+      const parts = hash.split('join=');
+      if (parts[1]) detectedCode = parts[1].replace(/[^a-zA-Z0-9]/g, '');
+    } else if (searchParams.get('code')) {
+      detectedCode = searchParams.get('code');
+    }
+
+    if (detectedCode && detectedCode.length === 8) {
+      setUrlInvitationCode(detectedCode.toUpperCase());
+      setCurrentView('landing');
+    }
   }, []);
 
-  // Add a participant from map click
-  const handleMapClickAdd = useCallback(
-    (lat: number, lon: number) => {
-      const idx = participants.length;
-      const autoName =
-        idx < SAMPLE_NAMES.length ? SAMPLE_NAMES[idx] : `Participant ${idx + 1}`;
+  // Collaborative Handlers
+  const handleSessionCreated = (created: CreateSessionResponse) => {
+    const sessionPublic: MeetingSessionPublic = {
+      session_id: created.session_id,
+      invitation_code: created.invitation_code,
+      title: created.title,
+      description: created.description,
+      status: 'active',
+      network_type: created.network_type,
+      optimization_objective: created.optimization_objective,
+      top_k: created.top_k,
+      result_is_stale: false,
+      expires_at: created.expires_at,
+      created_at: created.created_at,
+      participants_count: 0,
+      is_expired: false,
+    };
+    setActiveSession(sessionPublic);
+    setUserRole('HOST');
+    setSessionToken(created.host_token);
+    setCurrentParticipantId(null);
+    setCurrentView('room');
+  };
+
+  const handleSessionJoined = (joinData: JoinSessionResponse) => {
+    const sessionPublic: MeetingSessionPublic = {
+      session_id: joinData.session_id,
+      invitation_code: urlInvitationCode || '',
+      title: 'Meeting Session',
+      description: null,
+      status: 'active',
+      network_type: 'walk',
+      optimization_objective: 'median',
+      top_k: 5,
+      result_is_stale: false,
+      expires_at: new Date(Date.now() + 86400000).toISOString(),
+      created_at: new Date().toISOString(),
+      participants_count: 1,
+      is_expired: false,
+    };
+    setActiveSession(sessionPublic);
+    setUserRole('PARTICIPANT');
+    setSessionToken(joinData.participant_token);
+    setCurrentParticipantId(joinData.participant_id);
+    setCurrentView('room');
+  };
+
+  const handleExitRoom = () => {
+    setActiveSession(null);
+    setUserRole('VIEWER');
+    setSessionToken('');
+    setCurrentParticipantId(null);
+    setCurrentView('landing');
+    window.location.hash = '';
+  };
+
+  // Sandbox Handlers (Phase 3)
+  const handleAddParticipant = useCallback(
+    (name: string, lat: number, lon: number) => {
       const newParticipant: Participant = {
-        id: `p_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-        name: autoName,
+        id: `p_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        name: name.trim() || `Person ${participants.length + 1}`,
         latitude: lat,
         longitude: lon,
-        color: getParticipantColor(idx),
+        color: getParticipantColor(participants.length),
       };
-
       setParticipants((prev) => [...prev, newParticipant]);
-      setResult(null); // Reset stale result
+      setResult(null);
       setErrorMessage(null);
     },
     [participants.length]
   );
 
-  // Manual Add
-  const handleAddParticipant = (name: string, lat: number, lon: number) => {
-    const idx = participants.length;
-    const newParticipant: Participant = {
-      id: `p_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-      name: name || `Participant ${idx + 1}`,
-      latitude: lat,
-      longitude: lon,
-      color: getParticipantColor(idx),
-    };
+  const handleMapClickAdd = useCallback(
+    (lat: number, lon: number) => {
+      const defaultName = SAMPLE_NAMES[participants.length % SAMPLE_NAMES.length];
+      handleAddParticipant(defaultName, Number(lat.toFixed(6)), Number(lon.toFixed(6)));
+    },
+    [handleAddParticipant, participants.length]
+  );
 
-    setParticipants((prev) => [...prev, newParticipant]);
-    setResult(null);
-    setErrorMessage(null);
-  };
-
-  // Move participant marker (drag & drop)
   const handleParticipantMove = (id: string, lat: number, lon: number) => {
     setParticipants((prev) =>
       prev.map((p) => (p.id === id ? { ...p, latitude: lat, longitude: lon } : p))
@@ -105,17 +186,13 @@ export const App: React.FC = () => {
     setErrorMessage(null);
   };
 
-  // Update participant details
   const handleUpdateParticipant = (id: string, name: string, lat: number, lon: number) => {
     setParticipants((prev) =>
-      prev.map((p) =>
-        p.id === id ? { ...p, name, latitude: lat, longitude: lon } : p
-      )
+      prev.map((p) => (p.id === id ? { ...p, name, latitude: lat, longitude: lon } : p))
     );
     setResult(null);
   };
 
-  // Remove participant
   const handleRemoveParticipant = (id: string) => {
     setParticipants((prev) => {
       const updated = prev.filter((p) => p.id !== id);
@@ -124,7 +201,6 @@ export const App: React.FC = () => {
     setResult(null);
   };
 
-  // Clear all
   const handleClearAll = () => {
     setParticipants([]);
     setResult(null);
@@ -132,7 +208,6 @@ export const App: React.FC = () => {
     setSelectedCandidateNodeId(null);
   };
 
-  // Load sample demo participants
   const handleLoadSample = () => {
     const sample = PRESET_PARTICIPANTS.map((preset, idx) => ({
       id: `sample_${idx + 1}`,
@@ -146,7 +221,6 @@ export const App: React.FC = () => {
     setErrorMessage(null);
   };
 
-  // Toggle individual route visibility on map
   const handleToggleRouteVisibility = (participantId: string) => {
     setVisibleRouteIds((prev) => {
       const next = new Set(prev);
@@ -159,12 +233,10 @@ export const App: React.FC = () => {
     });
   };
 
-  // Select alternative candidate
   const handleSelectCandidate = (candidate: CandidateRecommendation) => {
     setSelectedCandidateNodeId(candidate.node_id);
   };
 
-  // Run calculation
   const handleCalculate = async () => {
     if (participants.length < 2) return;
 
@@ -188,10 +260,9 @@ export const App: React.FC = () => {
       setResult(response);
       setSelectedCandidateNodeId(response.optimal_node_id);
 
-      // Make all participant routes visible by default
       const allIds = new Set(response.individual_distances.map((d) => d.participant_id));
       setVisibleRouteIds(allIds);
-      setClickToAddEnabled(false); // disable click-to-add so map clicking interacts with routes
+      setClickToAddEnabled(false);
     } catch (err) {
       if (err instanceof ApiError) {
         setErrorMessage(err.message);
@@ -203,6 +274,31 @@ export const App: React.FC = () => {
     }
   };
 
+  // Render Views
+  if (currentView === 'landing') {
+    return (
+      <LandingPage
+        initialCode={urlInvitationCode}
+        onSessionCreated={handleSessionCreated}
+        onSessionJoined={handleSessionJoined}
+        onLaunchSoloDemo={() => setCurrentView('sandbox')}
+      />
+    );
+  }
+
+  if (currentView === 'room' && activeSession) {
+    return (
+      <CollaborativeRoom
+        initialSession={activeSession}
+        userRole={userRole}
+        token={sessionToken}
+        currentParticipantId={currentParticipantId}
+        onExit={handleExitRoom}
+      />
+    );
+  }
+
+  // Sandbox Mode (Phase 3)
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-100">
       {/* 1. Top Navbar */}
@@ -211,6 +307,7 @@ export const App: React.FC = () => {
         onLoadSample={handleLoadSample}
         onReset={handleClearAll}
         participantCount={participants.length}
+        onSwitchToCollaborative={() => setCurrentView('landing')}
       />
 
       {/* 2. Main Workspace */}
@@ -218,7 +315,6 @@ export const App: React.FC = () => {
         {/* Left Control & Results Sidebar */}
         <div className="w-full md:w-[420px] lg:w-[460px] flex-shrink-0 bg-white border-r border-slate-200 shadow-sm flex flex-col z-20 h-1/2 md:h-full">
           <div className="p-4 overflow-y-auto space-y-4 flex-1">
-            {/* Participants Management */}
             <ParticipantList
               participants={participants}
               onAddParticipant={handleAddParticipant}
@@ -229,7 +325,6 @@ export const App: React.FC = () => {
               onToggleClickToAdd={() => setClickToAddEnabled(!clickToAddEnabled)}
             />
 
-            {/* Optimization Controls */}
             <OptimizationControls
               objective={objective}
               onObjectiveChange={setObjective}
@@ -243,7 +338,6 @@ export const App: React.FC = () => {
               errorMessage={errorMessage}
             />
 
-            {/* Results Section */}
             {result && (
               <ResultsPanel
                 result={result}
@@ -259,7 +353,7 @@ export const App: React.FC = () => {
           </div>
         </div>
 
-        {/* Right Interactive Map (65-70%) */}
+        {/* Right Interactive Map */}
         <div className="flex-1 h-1/2 md:h-full relative overflow-hidden">
           <MapView
             participants={participants}
@@ -277,4 +371,5 @@ export const App: React.FC = () => {
     </div>
   );
 };
+
 export default App;

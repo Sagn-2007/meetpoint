@@ -21,6 +21,14 @@ class Settings(BaseSettings):
     MIN_BBOX_PADDING_DEG: float = 0.015  # ~1.65 km minimum padding
     MAX_SNAP_DISTANCE_M: float = 10000.0  # 10 km max distance from node
     
+    # Database configuration
+    DATABASE_URL: str = "postgresql+asyncpg://meetpoint:meetpoint@localhost:5432/meetpoint"
+    SYNC_DATABASE_URL: str = "postgresql+psycopg2://meetpoint:meetpoint@localhost:5432/meetpoint"
+
+    # Collaborative Session parameters
+    SESSION_EXPIRATION_HOURS: int = 24
+    INVITATION_CODE_LENGTH: int = 8
+
     # Optimization parameters
     DEFAULT_TOP_K: int = 5
     MAX_TOP_K: int = 20

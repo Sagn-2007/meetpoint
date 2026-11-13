@@ -8,6 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.routes import router as api_router
+from app.api.session_routes import router as session_router
+from app.api.websocket import router as ws_router
 from app.core.config import settings
 from app.core.exceptions import MeetPointException
 from app.core.logging import logger
@@ -71,3 +73,5 @@ async def health_check() -> HealthResponse:
 
 # Include API v1 routes
 app.include_router(api_router, prefix=settings.API_V1_STR)
+app.include_router(session_router, prefix=settings.API_V1_STR)
+app.include_router(ws_router, prefix=settings.API_V1_STR)

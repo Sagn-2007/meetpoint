@@ -1,11 +1,12 @@
 import React from 'react';
-import { Navigation, Sparkles, RefreshCw } from 'lucide-react';
+import { Navigation, Sparkles, RefreshCw, Users } from 'lucide-react';
 
 interface NavbarProps {
   backendStatus: 'healthy' | 'unhealthy' | 'offline' | 'checking';
   onLoadSample: () => void;
   onReset: () => void;
   participantCount: number;
+  onSwitchToCollaborative?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -13,6 +14,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onLoadSample,
   onReset,
   participantCount,
+  onSwitchToCollaborative,
 }) => {
   return (
     <header className="bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between shadow-sm z-30 flex-shrink-0">
@@ -51,6 +53,17 @@ export const Navbar: React.FC<NavbarProps> = ({
             Engine: {backendStatus}
           </span>
         </div>
+
+        {/* Switch to Collaborative Mode */}
+        {onSwitchToCollaborative && (
+          <button
+            onClick={onSwitchToCollaborative}
+            className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 rounded-lg transition-colors shadow-sm"
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span>Multi-User Rooms</span>
+          </button>
+        )}
 
         {/* Load Preset Demo Button */}
         <button
