@@ -6,7 +6,9 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.logging import logger
+from app.core.rate_limit import rate_limit
 from app.db.session import get_db
 from app.models.session_schemas import (
     CreateSessionRequest,
@@ -46,6 +48,7 @@ def get_token(
     status_code=status.HTTP_201_CREATED,
     summary="Create collaborative meeting session",
     description="Creates a new meeting session with host token and shareable invitation code.",
+    dependencies=[Depends(rate_limit(lambda: settings.RATE_LIMIT_SESSION_CREATE, "session_create"))],
 )
 async def create_session(
     payload: CreateSessionRequest,
@@ -79,6 +82,7 @@ async def create_session(
     status_code=status.HTTP_200_OK,
     summary="Get session by invitation code",
     description="Retrieves public information about an active or closed session.",
+    dependencies=[Depends(rate_limit(lambda: settings.RATE_LIMIT_SESSION_GET, "session_get"))],
 )
 async def get_session(
     invitation_code: str,
@@ -95,6 +99,7 @@ async def get_session(
     status_code=status.HTTP_201_CREATED,
     summary="Join meeting session",
     description="Join session using invitation code and display name. Returns participant credentials.",
+    dependencies=[Depends(rate_limit(lambda: settings.RATE_LIMIT_SESSION_JOIN, "session_join"))],
 )
 async def join_session(
     invitation_code: str,
@@ -125,6 +130,7 @@ async def join_session(
     status_code=status.HTTP_200_OK,
     summary="Submit or update participant location",
     description="Participant explicitly submits or updates GPS coordinates.",
+    dependencies=[Depends(rate_limit(lambda: settings.RATE_LIMIT_SUBMIT_LOCATION, "submit_location"))],
 )
 async def submit_location(
     session_id: str,
@@ -193,6 +199,7 @@ async def withdraw_location(
     status_code=status.HTTP_200_OK,
     summary="Calculate optimal meeting point (Host only)",
     description="Initiates meeting location optimization for participants with submitted coordinates.",
+    dependencies=[Depends(rate_limit(lambda: settings.RATE_LIMIT_OPTIMIZE, "session_optimize"))],
 )
 async def optimize_session(
     session_id: str,
@@ -220,9 +227,10 @@ async def optimize_session(
 )
 async def get_results(
     session_id: str,
+    token: Optional[str] = Depends(get_token),
     db: AsyncSession = Depends(get_db),
 ) -> SessionResultResponse:
-    result_data = await session_service.get_session_results(db=db, session_id=session_id)
+    result_data = await session_service.get_session_results(db=db, session_id=session_id, token=token)
     return SessionResultResponse(**result_data)
 
 

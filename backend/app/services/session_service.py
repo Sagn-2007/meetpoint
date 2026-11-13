@@ -8,11 +8,19 @@ import json
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
+from app.core.exceptions import (
+    DisconnectedNetworkError,
+    GeographicSpreadError,
+    MeetPointException,
+    NetworkAcquisitionError,
+    ParticipantCoordinateError,
+    ParticipantSnappingError,
+)
 from app.core.logging import logger
 from app.core.security import (
     generate_invitation_code,
@@ -681,6 +689,36 @@ class SessionService:
                 opt_request,
             )
             result_dict = response.model_dump(mode="json")
+        except (ParticipantCoordinateError, GeographicSpreadError) as e:
+            logger.warning("Coordinate/spread error in session optimization %s: %s", session.id, e)
+            await manager.broadcast(
+                session.id,
+                {"type": "optimization_failed", "data": {"error": e.message if hasattr(e, 'message') else str(e)}},
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Optimization request rejected: {e.message if hasattr(e, 'message') else str(e)}",
+            ) from e
+        except (ParticipantSnappingError, DisconnectedNetworkError) as e:
+            logger.warning("Routing or network error in session optimization %s: %s", session.id, e)
+            await manager.broadcast(
+                session.id,
+                {"type": "optimization_failed", "data": {"error": e.message if hasattr(e, 'message') else str(e)}},
+            )
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"Optimization failed: {e.message if hasattr(e, 'message') else str(e)}",
+            ) from e
+        except NetworkAcquisitionError as e:
+            logger.error("OSM acquisition error in session optimization %s: %s", session.id, e)
+            await manager.broadcast(
+                session.id,
+                {"type": "optimization_failed", "data": {"error": "Failed to acquire road network from OpenStreetMap"}},
+            )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"OpenStreetMap network acquisition failed: {str(e)}",
+            ) from e
         except Exception as e:
             logger.error("Optimization failed for session %s: %s", session.id, e, exc_info=True)
             await manager.broadcast(
@@ -727,9 +765,29 @@ class SessionService:
         self,
         db: AsyncSession,
         session_id: str,
+        token: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Retrieve latest optimization result and staleness status."""
         session = await self.get_session_by_id(db, session_id)
+
+        # Enforce authorization boundaries
+        if token:
+            role, participant = self.authenticate_token(session, token)
+            if role not in ("HOST", "PARTICIPANT"):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Invalid credentials for session.",
+                )
+            if role == "PARTICIPANT" and (not participant or participant.left_at is not None):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Participant is no longer active in this session.",
+                )
+        elif settings.ENVIRONMENT == "production":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication token is required to access session results.",
+            )
 
         if not session.optimizations:
             return {
@@ -805,6 +863,74 @@ class SessionService:
             user_role=user_role,
             current_participant_id=current_participant_id,
         )
+
+    async def mark_expired_sessions(self, db: AsyncSession) -> list[str]:
+        """Find active sessions that passed expires_at, mark them closed, broadcast closure and disconnect sockets."""
+        now = datetime.now(timezone.utc)
+        result = await db.execute(
+            select(MeetingSession).where(
+                MeetingSession.status == "active",
+                MeetingSession.expires_at < now,
+            )
+        )
+        expired_sessions = list(result.scalars().all())
+        closed_ids: list[str] = []
+
+        for session in expired_sessions:
+            session.status = "closed"
+            session.closed_at = now
+            closed_ids.append(session.id)
+
+        if closed_ids:
+            await db.commit()
+            for session_id in closed_ids:
+                # Broadcast session_closed
+                await manager.broadcast(
+                    session_id,
+                    {
+                        "type": "session_closed",
+                        "data": {
+                            "closed_at": now.isoformat(),
+                            "message": "This meeting session has expired and is now closed.",
+                        },
+                    },
+                )
+                # Disconnect active WebSockets in that room
+                await manager.close_room(session_id, code=4003, reason="Session expired and closed")
+        return closed_ids
+
+    async def purge_retained_sessions(self, db: AsyncSession, retention_hours: int = 48) -> int:
+        """Permanently delete sessions older than retention_hours (cascades to participants & optimizations)."""
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(hours=retention_hours)
+        result = await db.execute(
+            select(MeetingSession).where(
+                MeetingSession.status == "closed",
+                or_(
+                    MeetingSession.closed_at < cutoff,
+                    MeetingSession.expires_at < cutoff,
+                ),
+            )
+        )
+        retained = list(result.scalars().all())
+        count = len(retained)
+        for s in retained:
+            await db.delete(s)
+        if count > 0:
+            await db.commit()
+            logger.info("Purged %d expired sessions older than retention window (%dh)", count, retention_hours)
+        return count
+
+    async def run_cleanup(self, db: AsyncSession, retention_hours: int | None = None) -> dict[str, Any]:
+        """Execute full expiration check and retention purge cycle."""
+        hours = retention_hours if retention_hours is not None else settings.SESSION_RETENTION_HOURS
+        closed = await self.mark_expired_sessions(db)
+        purged = await self.purge_retained_sessions(db, retention_hours=hours)
+        return {
+            "closed_sessions_count": len(closed),
+            "purged_sessions_count": purged,
+            "closed_session_ids": closed,
+        }
 
 
 session_service = SessionService()

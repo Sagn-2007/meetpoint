@@ -22,6 +22,7 @@ import { OptimizationControls } from './components/optimization/OptimizationCont
 import { ResultsPanel } from './components/results/ResultsPanel';
 import { LandingPage } from './components/collaborative/LandingPage';
 import { CollaborativeRoom } from './components/collaborative/CollaborativeRoom';
+import { ErrorBoundary } from './components/ui/ErrorBoundary';
 
 // Preset sample names
 const SAMPLE_NAMES = ['Alice', 'Bob', 'Charlie', 'Diana', 'Evan', 'Fiona', 'George'];
@@ -277,98 +278,104 @@ export const App: React.FC = () => {
   // Render Views
   if (currentView === 'landing') {
     return (
-      <LandingPage
-        initialCode={urlInvitationCode}
-        onSessionCreated={handleSessionCreated}
-        onSessionJoined={handleSessionJoined}
-        onLaunchSoloDemo={() => setCurrentView('sandbox')}
-      />
+      <ErrorBoundary fallbackTitle="MeetPoint Landing Error">
+        <LandingPage
+          initialCode={urlInvitationCode}
+          onSessionCreated={handleSessionCreated}
+          onSessionJoined={handleSessionJoined}
+          onLaunchSoloDemo={() => setCurrentView('sandbox')}
+        />
+      </ErrorBoundary>
     );
   }
 
   if (currentView === 'room' && activeSession) {
     return (
-      <CollaborativeRoom
-        initialSession={activeSession}
-        userRole={userRole}
-        token={sessionToken}
-        currentParticipantId={currentParticipantId}
-        onExit={handleExitRoom}
-      />
+      <ErrorBoundary fallbackTitle="Collaborative Room Error">
+        <CollaborativeRoom
+          initialSession={activeSession}
+          userRole={userRole}
+          token={sessionToken}
+          currentParticipantId={currentParticipantId}
+          onExit={handleExitRoom}
+        />
+      </ErrorBoundary>
     );
   }
 
   // Sandbox Mode (Phase 3)
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-100">
-      {/* 1. Top Navbar */}
-      <Navbar
-        backendStatus={backendStatus}
-        onLoadSample={handleLoadSample}
-        onReset={handleClearAll}
-        participantCount={participants.length}
-        onSwitchToCollaborative={() => setCurrentView('landing')}
-      />
+    <ErrorBoundary fallbackTitle="Sandbox Workspace Error">
+      <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-100">
+        {/* 1. Top Navbar */}
+        <Navbar
+          backendStatus={backendStatus}
+          onLoadSample={handleLoadSample}
+          onReset={handleClearAll}
+          participantCount={participants.length}
+          onSwitchToCollaborative={() => setCurrentView('landing')}
+        />
 
-      {/* 2. Main Workspace */}
-      <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
-        {/* Left Control & Results Sidebar */}
-        <div className="w-full md:w-[420px] lg:w-[460px] flex-shrink-0 bg-white border-r border-slate-200 shadow-sm flex flex-col z-20 h-1/2 md:h-full">
-          <div className="p-4 overflow-y-auto space-y-4 flex-1">
-            <ParticipantList
-              participants={participants}
-              onAddParticipant={handleAddParticipant}
-              onUpdateParticipant={handleUpdateParticipant}
-              onRemoveParticipant={handleRemoveParticipant}
-              onClearAll={handleClearAll}
-              clickToAddEnabled={clickToAddEnabled}
-              onToggleClickToAdd={() => setClickToAddEnabled(!clickToAddEnabled)}
-            />
-
-            <OptimizationControls
-              objective={objective}
-              onObjectiveChange={setObjective}
-              networkType={networkType}
-              onNetworkTypeChange={setNetworkType}
-              topK={topK}
-              onTopKChange={setTopK}
-              onCalculate={handleCalculate}
-              isLoading={isLoading}
-              participantCount={participants.length}
-              errorMessage={errorMessage}
-            />
-
-            {result && (
-              <ResultsPanel
-                result={result}
+        {/* 2. Main Workspace */}
+        <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
+          {/* Left Control & Results Sidebar */}
+          <div className="w-full md:w-[420px] lg:w-[460px] flex-shrink-0 bg-white border-r border-slate-200 shadow-sm flex flex-col z-20 h-1/2 md:h-full">
+            <div className="p-4 overflow-y-auto space-y-4 flex-1">
+              <ParticipantList
                 participants={participants}
-                selectedCandidateNodeId={selectedCandidateNodeId}
-                onSelectCandidate={handleSelectCandidate}
-                visibleRouteIds={visibleRouteIds}
-                onToggleRouteVisibility={handleToggleRouteVisibility}
-                compareActiveView={compareActiveView}
-                onSwitchCompareView={setCompareActiveView}
+                onAddParticipant={handleAddParticipant}
+                onUpdateParticipant={handleUpdateParticipant}
+                onRemoveParticipant={handleRemoveParticipant}
+                onClearAll={handleClearAll}
+                clickToAddEnabled={clickToAddEnabled}
+                onToggleClickToAdd={() => setClickToAddEnabled(!clickToAddEnabled)}
               />
-            )}
+
+              <OptimizationControls
+                objective={objective}
+                onObjectiveChange={setObjective}
+                networkType={networkType}
+                onNetworkTypeChange={setNetworkType}
+                topK={topK}
+                onTopKChange={setTopK}
+                onCalculate={handleCalculate}
+                isLoading={isLoading}
+                participantCount={participants.length}
+                errorMessage={errorMessage}
+              />
+
+              {result && (
+                <ResultsPanel
+                  result={result}
+                  participants={participants}
+                  selectedCandidateNodeId={selectedCandidateNodeId}
+                  onSelectCandidate={handleSelectCandidate}
+                  visibleRouteIds={visibleRouteIds}
+                  onToggleRouteVisibility={handleToggleRouteVisibility}
+                  compareActiveView={compareActiveView}
+                  onSwitchCompareView={setCompareActiveView}
+                />
+              )}
+            </div>
+          </div>
+
+          {/* Right Interactive Map */}
+          <div className="flex-1 h-1/2 md:h-full relative overflow-hidden">
+            <MapView
+              participants={participants}
+              onParticipantMove={handleParticipantMove}
+              onParticipantDelete={handleRemoveParticipant}
+              onMapClickAdd={handleMapClickAdd}
+              clickToAddEnabled={clickToAddEnabled}
+              result={result}
+              selectedCandidateNodeId={selectedCandidateNodeId}
+              onSelectCandidate={handleSelectCandidate}
+              visibleRouteIds={visibleRouteIds}
+            />
           </div>
         </div>
-
-        {/* Right Interactive Map */}
-        <div className="flex-1 h-1/2 md:h-full relative overflow-hidden">
-          <MapView
-            participants={participants}
-            onParticipantMove={handleParticipantMove}
-            onParticipantDelete={handleRemoveParticipant}
-            onMapClickAdd={handleMapClickAdd}
-            clickToAddEnabled={clickToAddEnabled}
-            result={result}
-            selectedCandidateNodeId={selectedCandidateNodeId}
-            onSelectCandidate={handleSelectCandidate}
-            visibleRouteIds={visibleRouteIds}
-          />
-        </div>
       </div>
-    </div>
+    </ErrorBoundary>
   );
 };
 

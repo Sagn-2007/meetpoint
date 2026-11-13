@@ -1,0 +1,41 @@
+# Git
+.git
+.gitignore
+
+# Python artifacts
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov/
+.venv
+venv/
+env/
+
+# Cache directories
+backend/cache/osm_graphs/*.graphml
+cache/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Frontend build & dependencies
+frontend/
+node_modules/
+
+# OS / Editor temporary files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Documentation drafts
+docs/

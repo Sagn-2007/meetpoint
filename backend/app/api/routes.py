@@ -1,8 +1,9 @@
 """FastAPI API routes for MeetPoint."""
 
 from __future__ import annotations
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
+from app.core.config import settings
 from app.core.exceptions import (
     DisconnectedNetworkError,
     InvalidBoundingBoxError,
@@ -12,6 +13,7 @@ from app.core.exceptions import (
     ParticipantSnappingError,
 )
 from app.core.logging import logger
+from app.core.rate_limit import rate_limit
 from app.models.schemas import (
     HealthResponse,
     NetworkInfoResponse,
@@ -33,6 +35,7 @@ router = APIRouter()
         "Snaps participant coordinates to the road network, computes traversable route distances "
         "via Dijkstra's algorithm, and determines the optimal Network 1-Median meeting location."
     ),
+    dependencies=[Depends(rate_limit(lambda: settings.RATE_LIMIT_OPTIMIZE, "meeting_optimize"))],
 )
 async def optimize_meeting(request: OptimizeMeetingRequest) -> OptimizeMeetingResponse:
     """Find the optimal meeting location for participants along traversable road networks."""

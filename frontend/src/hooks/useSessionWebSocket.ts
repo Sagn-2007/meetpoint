@@ -31,10 +31,10 @@ export function useSessionWebSocket({
   const connect = useCallback(() => {
     if (!sessionId || !token || !enabled) return;
 
-    // Build WS URL
+    // Build WS URL without raw tokens in query string
     const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
     const wsBase = apiBase.replace(/^http/, 'ws');
-    const wsUrl = `${wsBase}/api/v1/sessions/${sessionId}/ws?token=${encodeURIComponent(token)}`;
+    const wsUrl = `${wsBase}/api/v1/sessions/${sessionId}/ws`;
 
     setStatus(reconnectAttemptsRef.current === 0 ? 'connecting' : 'reconnecting');
 
@@ -43,6 +43,8 @@ export function useSessionWebSocket({
       wsRef.current = ws;
 
       ws.onopen = () => {
+        // First-message authentication handshake to keep credentials out of server access logs
+        ws.send(JSON.stringify({ type: 'authenticate', token }));
         setStatus('connected');
         reconnectAttemptsRef.current = 0;
 

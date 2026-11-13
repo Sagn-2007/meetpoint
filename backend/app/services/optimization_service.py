@@ -13,7 +13,7 @@ from app.algorithms.dijkstra import (
 from app.algorithms.one_center import OneCenterResult, solve_network_1_center
 from app.algorithms.one_median import OneMedianResult, solve_network_1_median
 from app.core.config import settings
-from app.core.exceptions import DisconnectedNetworkError, ParticipantCoordinateError
+from app.core.exceptions import DisconnectedNetworkError, GeographicSpreadError, ParticipantCoordinateError
 from app.core.logging import logger
 from app.models.geometry import BoundingBox, Coordinate
 from app.models.schemas import (
@@ -27,7 +27,7 @@ from app.models.schemas import (
     Participant,
     ParticipantRouteResult,
 )
-from app.services.network_service import NetworkService, network_service
+from app.services.network_service import NetworkService, calculate_haversine_distance, network_service
 from app.services.snapping_service import SnappedParticipant, SnappingService, snapping_service
 
 
@@ -130,10 +130,62 @@ class OptimizationService:
         if request.bounding_box is not None:
             bbox = request.bounding_box
         else:
+            # Check geographic spread across participants when computing bounding box automatically
+            max_dist_m = 0.0
+            for i in range(len(coords)):
+                for j in range(i + 1, len(coords)):
+                    d_m = calculate_haversine_distance(
+                        coords[i].latitude,
+                        coords[i].longitude,
+                        coords[j].latitude,
+                        coords[j].longitude,
+                    )
+                    if d_m > max_dist_m:
+                        max_dist_m = d_m
+
+            max_dist_km = max_dist_m / 1000.0
+            if max_dist_km > settings.MAX_PARTICIPANT_PAIRWISE_DISTANCE_KM:
+                msg = (
+                    f"Participants are too geographically dispersed ({max_dist_km:.1f} km apart). "
+                    f"MeetPoint is designed for metropolitan areas with a maximum participant separation of "
+                    f"{settings.MAX_PARTICIPANT_PAIRWISE_DISTANCE_KM} km."
+                )
+                logger.warning(msg)
+                raise GeographicSpreadError(
+                    msg,
+                    details={
+                        "max_distance_km": round(max_dist_km, 2),
+                        "limit_km": settings.MAX_PARTICIPANT_PAIRWISE_DISTANCE_KM,
+                    },
+                )
+
             bbox = BoundingBox.from_coordinates(
                 coords,
                 padding_ratio=settings.DEFAULT_BBOX_PADDING_RATIO,
                 min_padding_deg=settings.MIN_BBOX_PADDING_DEG,
+            )
+
+        # Check diagonal diameter of bounding box
+        bbox_diag_m = calculate_haversine_distance(
+            bbox.min_lat,
+            bbox.min_lon,
+            bbox.max_lat,
+            bbox.max_lon,
+        )
+        bbox_diag_km = bbox_diag_m / 1000.0
+        if bbox_diag_km > settings.MAX_BBOX_DIAMETER_KM:
+            msg = (
+                f"Requested geographic area is too large ({bbox_diag_km:.1f} km diagonal diameter). "
+                f"Maximum supported area diameter is {settings.MAX_BBOX_DIAMETER_KM} km to prevent server exhaustion."
+            )
+            logger.warning(msg)
+            raise GeographicSpreadError(
+                msg,
+                details={
+                    "bbox_diameter_km": round(bbox_diag_km, 2),
+                    "limit_km": settings.MAX_BBOX_DIAMETER_KM,
+                    "bbox": bbox.model_dump(),
+                },
             )
 
         logger.info(

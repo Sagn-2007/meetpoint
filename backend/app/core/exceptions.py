@@ -15,6 +15,11 @@ class ParticipantCoordinateError(MeetPointException):
     pass
 
 
+class GeographicSpreadError(ParticipantCoordinateError):
+    """Raised when participants are too geographically dispersed for metropolitan network optimization."""
+    pass
+
+
 class InvalidBoundingBoxError(MeetPointException):
     """Raised when bounding box parameters are invalid."""
     pass

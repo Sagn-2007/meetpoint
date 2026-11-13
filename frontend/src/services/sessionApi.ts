@@ -102,9 +102,16 @@ export async function triggerOptimization(
 }
 
 export async function getSessionResults(
-  sessionId: string
+  sessionId: string,
+  token?: string
 ): Promise<{ has_result: boolean; result_is_stale: boolean; result: OptimizeMeetingResponse | null }> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/sessions/${sessionId}/results`);
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers['X-Session-Token'] = token;
+  }
+  const response = await fetch(`${API_BASE_URL}/api/v1/sessions/${sessionId}/results`, {
+    headers,
+  });
   return handleResponse<{ has_result: boolean; result_is_stale: boolean; result: OptimizeMeetingResponse | null }>(
     response
   );

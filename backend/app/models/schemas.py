@@ -3,7 +3,7 @@
 from __future__ import annotations
 from enum import Enum
 import uuid
-from typing import Any
+from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 from app.models.geometry import BoundingBox, Coordinate
@@ -202,6 +202,7 @@ class HealthResponse(BaseModel):
     status: str = "healthy"
     service: str = "meetpoint-engine"
     version: str = "1.0.0"
+    database: Optional[str] = None
 
 
 class NetworkInfoResponse(BaseModel):

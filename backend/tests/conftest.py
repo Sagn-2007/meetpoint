@@ -8,6 +8,13 @@ from fastapi.testclient import TestClient
 from app.main import app
 
 
+@pytest.fixture(autouse=True)
+def reset_rate_limiter_fixture():
+    """Ensure rate limiter state is clean for each test execution."""
+    from app.core.rate_limit import rate_limiter
+    rate_limiter.reset()
+
+
 @pytest.fixture
 def api_client() -> TestClient:
     """FastAPI TestClient fixture."""

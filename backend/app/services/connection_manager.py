@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Dict, List, Optional, Set
 from fastapi import WebSocket
+from starlette.websockets import WebSocketState
 
 from app.core.logging import logger
 
@@ -26,8 +27,9 @@ class ConnectionManager:
         participant_id: Optional[str] = None,
         role: str = "VIEWER",
     ) -> None:
-        """Accept WebSocket connection and register it in the session room."""
-        await websocket.accept()
+        """Accept WebSocket connection (if not already accepted) and register it in the session room."""
+        if websocket.client_state == WebSocketState.CONNECTING:
+            await websocket.accept()
         async with self._lock:
             if session_id not in self._rooms:
                 self._rooms[session_id] = set()
@@ -63,6 +65,17 @@ class ConnectionManager:
                 meta.get("participant_id"),
             )
         return meta
+
+    async def close_room(self, session_id: str, code: int = 4003, reason: str = "Session closed") -> None:
+        """Close and disconnect all WebSockets in a session room."""
+        async with self._lock:
+            sockets = list(self._rooms.get(session_id, set()))
+        for ws in sockets:
+            try:
+                await ws.close(code=code, reason=reason)
+            except Exception:
+                pass
+            await self.disconnect(ws)
 
     def is_participant_online(self, session_id: str, participant_id: str) -> bool:
         """Check if any active WebSocket belongs to the given participant."""
